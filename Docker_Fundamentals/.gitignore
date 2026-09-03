@@ -1,0 +1,22 @@
+# Node.js
+node_modules/
+npm-debug.log
+build/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+venv/
+env/
+
+# Java
+*.class
+*.jar
+*.war
+target/
+
+# Ensure Dockerfiles are NOT ignored
+!Dockerfile*
+!*dockerfile*
