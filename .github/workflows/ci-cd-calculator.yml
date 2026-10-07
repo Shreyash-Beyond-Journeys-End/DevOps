@@ -8,10 +8,13 @@ on:
     branches: [main]
     paths:
       - ' CI_CD&GitHub_Actions/**'
+      - '.github/workflows/ci-cd-calculator.yml'
   pull_request:
     branches: [main]
     paths:
       - ' CI_CD&GitHub_Actions/**'
+      - '.github/workflows/ci-cd-calculator.yml'
+  workflow_dispatch: {}
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}/calculator-api
