@@ -86,7 +86,10 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ${{ env.APP_DIR }}
+          # GitHub Actions trims leading spaces from action inputs, so a plain
+          # "${{ env.APP_DIR }}" loses the folder's leading space. Prefixing
+          # with "./" keeps the space since it's no longer the first character.
+          context: ./${{ env.APP_DIR }}
           push: true
           tags: |
             ${{ env.IMAGE_NAME_LOWER }}:latest
