@@ -1,0 +1,85 @@
+name: CI-CD Pipeline - Calculator API
+
+# this workflow runs the CI part on every push/PR that touches the
+# "CI_CD&GitHub_Actions" homework folder, and runs the CD part only
+# when it gets pushed to main
+on:
+  push:
+    branches: [main]
+    paths:
+      - ' CI_CD&GitHub_Actions/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - ' CI_CD&GitHub_Actions/**'
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/calculator-api
+  APP_DIR: ' CI_CD&GitHub_Actions'
+
+jobs:
+  # ---------- CI: build + test ----------
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: '${{ env.APP_DIR }}/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: npm install
+
+      - name: Run tests
+        working-directory: ${{ env.APP_DIR }}
+        run: npm test
+
+      - name: Use demo secret (shows secrets work in the logs, value stays masked)
+        env:
+          DEMO_SECRET: ${{ secrets.DEMO_SECRET }}
+        run: |
+          if [ -z "$DEMO_SECRET" ]; then
+            echo "DEMO_SECRET not set, skipping this step"
+          else
+            echo "Got a secret from GitHub, length is ${#DEMO_SECRET} characters"
+          fi
+
+      - name: Upload test coverage as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: '${{ env.APP_DIR }}/coverage/'
+          retention-days: 5
+
+  # ---------- CD: build image and push it ----------
+  build-and-push-image:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.APP_DIR }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
