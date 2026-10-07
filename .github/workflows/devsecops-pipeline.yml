@@ -1,0 +1,199 @@
+name: DevSecOps Pipeline - Calculator API
+
+# Code -> Build -> Unit Test -> SAST -> SCA -> Secret Scan -> Docker Build
+#      -> Image Scan -> Security Gate -> Push Image -> Deploy to Kubernetes
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Complete_CI_CD&DevSecOps/**'
+      - '.github/workflows/devsecops-pipeline.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Complete_CI_CD&DevSecOps/**'
+      - '.github/workflows/devsecops-pipeline.yml'
+  workflow_dispatch: {}
+
+env:
+  APP_DIR: Complete_CI_CD&DevSecOps
+  IMAGE_NAME: devsecops-calculator
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- 1. Build + unit test ----------
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.APP_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies (build)
+        run: npm ci
+      - name: Unit tests with coverage
+        run: npm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ${{ env.APP_DIR }}/coverage/
+          retention-days: 5
+
+  # ---------- 2. SAST ----------
+  sast-semgrep:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Semgrep
+        run: pip install semgrep
+      - name: Run Semgrep (registry rules + my own custom rule)
+        working-directory: ${{ env.APP_DIR }}
+        # --error makes the job fail if any finding is reported
+        run: semgrep scan --config p/javascript --config security/semgrep-rules.yml --error src tests
+
+  # ---------- 3. SCA ----------
+  sca-npm-audit:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.APP_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Audit production dependencies (fail on high/critical)
+        # dev-only packages (jest) never ship in the image, so only prod deps gate the build
+        run: npm audit --omit=dev --audit-level=high
+
+  # ---------- 4. Secret scan ----------
+  secret-scan-gitleaks:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Gitleaks
+        run: |
+          docker run --rm -v "$PWD/${APP_DIR}":/repo zricethezav/gitleaks:latest \
+            detect --source /repo --no-git --config /repo/security/.gitleaks.toml --redact --verbose
+
+  # ---------- 5. Docker build + image scan ----------
+  docker-build-and-scan:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Docker image (not pushed yet)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ env.APP_DIR }}
+          load: true
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+      - name: Scan image with Trivy (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: ${{ env.APP_DIR }}/security/.trivyignore
+      - name: Save image so the push job uses exactly what was scanned
+        run: docker save ${{ env.IMAGE_NAME }}:${{ github.sha }} -o image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scanned-image
+          path: image.tar
+          retention-days: 1
+
+  # ---------- 6. Security gate ----------
+  security-gate:
+    needs: [sast-semgrep, sca-npm-audit, secret-scan-gitleaks, docker-build-and-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All security checks passed
+        run: |
+          echo "SAST (Semgrep):       passed"
+          echo "SCA (npm audit):      passed"
+          echo "Secrets (Gitleaks):   passed"
+          echo "Image scan (Trivy):   passed"
+          echo "Security gate OPEN - image can be pushed."
+
+  # ---------- 7. Push image ----------
+  push-image:
+    needs: security-gate
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: scanned-image
+      - name: Work out the (lowercase) registry image name
+        id: meta
+        run: |
+          OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${OWNER}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Load, tag and push
+        run: |
+          docker load -i image.tar
+          IMG=${{ steps.meta.outputs.image }}
+          docker tag ${IMAGE_NAME}:${{ github.sha }} ${IMG}:${{ github.sha }}
+          docker tag ${IMAGE_NAME}:${{ github.sha }} ${IMG}:latest
+          docker push ${IMG}:${{ github.sha }}
+          docker push ${IMG}:latest
+
+  # ---------- 8. Deploy to Kubernetes ----------
+  deploy-k8s:
+    needs: push-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create a Kubernetes cluster (kind)
+        uses: helm/kind-action@v1
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull the pushed image and load it into the cluster
+        run: |
+          IMG=${{ needs.push-image.outputs.image }}:${{ github.sha }}
+          docker pull "$IMG"
+          kind load docker-image "$IMG" --name chart-testing
+      - name: Deploy manifests
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          IMG=${{ needs.push-image.outputs.image }}:${{ github.sha }}
+          sed -i "s|image: .*|image: ${IMG}|" k8s/deployment.yaml
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/calculator -n devsecops-demo --timeout=120s
+          kubectl get pods,svc -n devsecops-demo -o wide
+      - name: Smoke test
+        run: |
+          kubectl port-forward -n devsecops-demo svc/calculator 8080:80 &
+          sleep 5
+          curl -sf localhost:8080/health
+          curl -sf localhost:8080/add/2/3

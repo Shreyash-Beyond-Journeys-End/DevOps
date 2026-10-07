@@ -1,0 +1,7 @@
+# one extra rule I wrote myself, on top of the normal semgrep rules
+rules:
+  - id: no-eval
+    languages: [javascript]
+    severity: ERROR
+    message: Do not use eval(), it can run attacker code
+    pattern: eval(...)

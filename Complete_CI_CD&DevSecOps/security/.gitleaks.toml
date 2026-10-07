@@ -1,0 +1,13 @@
+# gitleaks config - uses the default rules and ignores a few folders
+title = "my gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "files that do not need scanning"
+paths = [
+  '''node_modules/''',
+  '''coverage/''',
+  '''package-lock\.json'''
+]
