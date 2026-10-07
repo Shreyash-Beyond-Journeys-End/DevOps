@@ -107,7 +107,25 @@ Local runs of each stage (`screenshots/`):
 | Docker build + image scan (Trivy) | `05-docker-build-image-scan.png` |
 | Kubernetes deployment | `06-k8s-deployment.png` |
 
-GitHub Actions run: see the `pipeline-*.png` files in `screenshots/`.
+Successful GitHub Actions run (all 8 jobs green, 3m 28s):
+
+| Evidence | File |
+|---|---|
+| Full pipeline graph | `pipeline-01-success-graph.png` |
+| Security gate log | `pipeline-02-security-gate.png` |
+| Trivy image scan step | `pipeline-03-trivy-scan.png` |
+| Kubernetes deploy (rollout + pods/service) | `pipeline-04-k8s-deploy.png` |
+| Smoke test against the deployed service | `pipeline-05-smoke-test.png` |
+| Image published in GHCR | `pipeline-06-ghcr-package.png` |
+
+![pipeline graph](screenshots/pipeline-01-success-graph.png)
+![security gate](screenshots/pipeline-02-security-gate.png)
+![trivy scan](screenshots/pipeline-03-trivy-scan.png)
+![k8s deploy](screenshots/pipeline-04-k8s-deploy.png)
+![smoke test](screenshots/pipeline-05-smoke-test.png)
+![ghcr package](screenshots/pipeline-06-ghcr-package.png)
+
+Local runs:
 
 ![unit tests](screenshots/01-unit-tests.png)
 ![semgrep](screenshots/02-sast-semgrep.png)
