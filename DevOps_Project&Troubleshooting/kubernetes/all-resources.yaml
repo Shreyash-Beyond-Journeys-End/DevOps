@@ -1,0 +1,147 @@
+---
+# Source: taskboard/templates/postgres.yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: taskboard-postgres}
+type: Opaque
+stringData:
+  username: "taskboard"
+  password: "taskboard"
+---
+# Source: taskboard/templates/postgres.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: taskboard-postgres-data}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+---
+# Source: taskboard/templates/backend-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: taskboard-taskboard-backend
+  labels: {app: taskboard-backend}
+spec:
+  selector: {app: taskboard-backend}
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+---
+# Source: taskboard/templates/frontend-service.yaml
+apiVersion: v1
+kind: Service
+metadata: {name: taskboard-frontend}
+spec:
+  selector: {app: taskboard-frontend}
+  ports: [{port: 80, targetPort: 80}]
+---
+# Source: taskboard/templates/postgres.yaml
+apiVersion: v1
+kind: Service
+metadata: {name: taskboard-postgres}
+spec:
+  selector: {app: taskboard-postgres}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+# Source: taskboard/templates/backend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskboard-taskboard-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: taskboard-backend}
+  template:
+    metadata:
+      labels: {app: taskboard-backend}
+    spec:
+      containers:
+        - name: backend
+          image: "ghcr.io/YOUR_ORG/taskboard-backend:latest"
+          ports: [{containerPort: 8000}]
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://taskboard:taskboard@taskboard-postgres:5432/taskboard"
+          readinessProbe:
+            httpGet: {path: /ready, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+---
+# Source: taskboard/templates/frontend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: taskboard-frontend, labels: {app: taskboard-frontend}}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: taskboard-frontend}}
+  template:
+    metadata: {labels: {app: taskboard-frontend}}
+    spec:
+      containers:
+      - name: frontend
+        image: "ghcr.io/YOUR_ORG/taskboard-frontend:latest"
+        ports: [{containerPort: 80}]
+        readinessProbe: {httpGet: {path: /, port: 80}, initialDelaySeconds: 5}
+        livenessProbe: {httpGet: {path: /, port: 80}, initialDelaySeconds: 10}
+        resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi}}
+---
+# Source: taskboard/templates/postgres.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: taskboard-postgres}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: taskboard-postgres}}
+  template:
+    metadata: {labels: {app: taskboard-postgres}}
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        ports: [{containerPort: 5432}]
+        env:
+        - {name: POSTGRES_DB, value: "taskboard"}
+        - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: taskboard-postgres, key: username}}}
+        - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: taskboard-postgres, key: password}}}
+        readinessProbe: {exec: {command: ["sh","-c","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]}, initialDelaySeconds: 5, periodSeconds: 10}
+        volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: taskboard-postgres-data}}]
+---
+# Source: taskboard/templates/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: taskboard-backend}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: taskboard-taskboard-backend}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}}]
+---
+# Source: taskboard/templates/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: taskboard-taskboard-backend
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels: {app: taskboard-backend}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

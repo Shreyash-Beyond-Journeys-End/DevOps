@@ -1,0 +1,73 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+.env
+.venv
+
+# Node / Frontend
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+dist-ssr/
+*.local
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Helm / Kubernetes
+**/.helmignore
+*.tgz
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Security Reports
+security/*_report.txt
+
+# Do NOT ignore Screenshots (so you can push them for your homework!)
+!Screenshots/
